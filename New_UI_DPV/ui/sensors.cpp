@@ -5,20 +5,24 @@
 
 static SensorData received_data = {0};
 static SemaphoreHandle_t data_mux = NULL;
+static bool has_new_data = false;
+static uint32_t last_received_time = 0; // เก็บเวลาที่ได้รับข้อมูลล่าสุด
 
 // ฟังก์ชันจัดการเมื่อได้รับข้อมูลไร้สาย (ESP-NOW Callback)
 void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingData, int len) {
     if (len == sizeof(SensorData)) {
-        // ใช้ Semaphore เพื่อป้องกันการเขียนและอ่านข้อมูลพร้อมกัน (Thread Safety)
-        if (data_mux != NULL && xSemaphoreTake(data_mux, pdMS_TO_TICKS(10))) {
+        // ใช้ Semaphore แบบไม่รอ (Timeout = 0) เพื่อไม่ให้หน่วง WiFi Task
+        if (data_mux != NULL && xSemaphoreTake(data_mux, 0)) {
             memcpy(&received_data, incomingData, sizeof(SensorData));
+            has_new_data = true;
+            last_received_time = millis(); // อัปเดตเวลาล่าสุดที่ได้รับข้อมูล
             xSemaphoreGive(data_mux);
         }
     } else {
-        // แจ้งเตือนถ้าขนาดข้อมูลไม่ตรงกัน (อาจเกิดจากโครงสร้าง struct ในโค้ดทั้งสองฝั่งไม่เหมือนกัน)
+        // แจ้งเตือนด้วย ESP_LOGW แทน printf เพื่อความปลอดภัยใน callback
         static unsigned long last_warn = 0;
         if(millis() - last_warn > 5000) {
-            printf("คำเตือน: ขนาดข้อมูล ESP-NOW ไม่ตรงกัน! ได้รับ: %d, คาดหวัง: %d\n", len, (int)sizeof(SensorData));
+            ESP_LOGW("SENSORS", "ขนาดข้อมูล ESP-NOW ไม่ตรงกัน! ได้รับ: %d, คาดหวัง: %d", len, (int)sizeof(SensorData));
             last_warn = millis();
         }
     }
@@ -35,7 +39,6 @@ void sensors_init() {
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
     esp_wifi_set_promiscuous(false);
-    WiFi.disconnect();
 
     // เริ่มต้นโปรโตคอล ESP-NOW
     if (esp_now_init() != ESP_OK) {
@@ -58,7 +61,20 @@ SensorData sensors_get_data() {
     SensorData current_data = {0};
     if (data_mux != NULL && xSemaphoreTake(data_mux, pdMS_TO_TICKS(50))) {
         current_data = received_data;
+        // การดึงข้อมูลไปใช้จะเคลียร์ flag ว่าข้อมูลใหม่ถูกอ่านแล้ว
+        has_new_data = false; 
         xSemaphoreGive(data_mux);
     }
     return current_data;
+}
+
+// ฟังก์ชันเช็คว่ามีข้อมูลใหม่ที่ยังไม่ได้อ่านหรือไม่
+bool sensors_new_data_available() {
+    return has_new_data;
+}
+
+// ฟังก์ชันเช็คว่าบอร์ดส่งยังเชื่อมต่ออยู่หรือไม่ (Timeout 3 วินาที)
+bool sensors_is_connected() {
+    if (last_received_time == 0) return false;
+    return (millis() - last_received_time < 3000);
 }
