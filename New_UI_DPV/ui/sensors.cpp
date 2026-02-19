@@ -1,68 +1,64 @@
 #include "sensors.h"
-#include <DHT.h>
-#include <ui.h>       // To access UI widgets like ui_Temp_Label
-#include <lvgl.h>     // For LVGL locking
+#include <esp_now.h>
+#include <WiFi.h>
+#include <esp_wifi.h>
 
-// --- Configuration ---
-#define DHTTYPE    DHT22   // Change to DHT11 if needed
-#define UPDATE_INTERVAL_MS 2000 // Read every 2 seconds
+static SensorData received_data = {0};
+static SemaphoreHandle_t data_mux = NULL;
 
-// --- Global Objects ---
-DHT dht(PIN_DHT_SENSOR, DHTTYPE);
-
-// --- Variables ---
-static float current_temp = 0.0;
-static float current_humid = 0.0;
-static unsigned long last_update = 0;
-
-void sensors_init() {
-    Serial.println("Initializing Sensors...");
-    dht.begin();
-    pinMode(PIN_DHT_SENSOR, INPUT_PULLUP); // Safety for standalone sensors
-}
-
-void sensors_update() {
-    // Non-blocking delay
-    if (millis() - last_update > UPDATE_INTERVAL_MS) {
-        last_update = millis();
-
-        // 1. Read Data
-        float t = dht.readTemperature();
-        float h = dht.readHumidity();
-
-        // 2. Validate
-        if (isnan(t) || isnan(h)) {
-            Serial.println("Failed to read from DHT sensor!");
-            return; // Keep old values
+// ฟังก์ชันจัดการเมื่อได้รับข้อมูลไร้สาย (ESP-NOW Callback)
+void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingData, int len) {
+    if (len == sizeof(SensorData)) {
+        // ใช้ Semaphore เพื่อป้องกันการเขียนและอ่านข้อมูลพร้อมกัน (Thread Safety)
+        if (data_mux != NULL && xSemaphoreTake(data_mux, pdMS_TO_TICKS(10))) {
+            memcpy(&received_data, incomingData, sizeof(SensorData));
+            xSemaphoreGive(data_mux);
         }
-
-        current_temp = t;
-        current_humid = h;
-        
-        Serial.printf("Temp: %.1f C, Humid: %.1f %%\n", t, h);
-
-        // 3. Update UI (Thread Safe)
-        // Note: You must ensure ui_init() was called before this
-        lvgl_port_lock(0);
-        
-        // Example: Update Label if it exists
-        // if (ui_Temp_Label != NULL) {
-        //    lv_label_set_text_fmt(ui_Temp_Label, "%.1f C", current_temp);
-        // }
-        
-        // Temporary: Show on ui_time if ui_Temp_Label doesn't exist
-        if (ui_time != NULL) {
-             lv_label_set_text_fmt(ui_time, "%.1f C", current_temp);
+    } else {
+        // แจ้งเตือนถ้าขนาดข้อมูลไม่ตรงกัน (อาจเกิดจากโครงสร้าง struct ในโค้ดทั้งสองฝั่งไม่เหมือนกัน)
+        static unsigned long last_warn = 0;
+        if(millis() - last_warn > 5000) {
+            printf("คำเตือน: ขนาดข้อมูล ESP-NOW ไม่ตรงกัน! ได้รับ: %d, คาดหวัง: %d\n", len, (int)sizeof(SensorData));
+            last_warn = millis();
         }
-
-        lvgl_port_unlock();
     }
 }
 
-float get_temperature() {
-    return current_temp;
+// ฟังก์ชันเริ่มต้นระบบ WiFi และตัวรับ ESP-NOW บน Channel 1
+void sensors_init() {
+    // สร้าง Mutex เพื่อปกป้องตัวแปร 'received_data' จากการเข้าถึงพร้อมกัน
+    data_mux = xSemaphoreCreateMutex();
+    
+    // ตั้งค่า WiFi เป็นโหมด Station. สำคัญ: ต้องล็อคความถี่ไว้ที่ Channel 1
+    // เพราะบอร์ดทั้งสองต้องอยู่บนความถี่วิทยุเดียวกันจึงจะคุยกันได้
+    WiFi.mode(WIFI_STA);
+    esp_wifi_set_promiscuous(true);
+    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_promiscuous(false);
+    WiFi.disconnect();
+
+    // เริ่มต้นโปรโตคอล ESP-NOW
+    if (esp_now_init() != ESP_OK) {
+        ESP_LOGE("SENSORS", "เกิดข้อผิดพลาดในการเริ่มต้น ESP-NOW");
+        return;
+    }
+
+    // ลงทะเบียนฟังก์ชัน 'OnDataRecv' ให้ทำงานทุกครั้งที่มีข้อมูลส่งมาจากบอร์ดเซ็นเซอร์
+    esp_now_register_recv_cb(esp_now_recv_cb_t(OnDataRecv));
+    
+    ESP_LOGI("SENSORS", "เริ่มต้นตัวรับ ESP-NOW สำเร็จบน Channel 1");
 }
 
-float get_humidity() {
-    return current_humid;
+void sensors_update() {
+    // ฟังก์ชันนี้ปัจจุบันไม่ได้ใช้งานเนื่องจากใช้ระบบ Callback
+}
+
+// ฟังก์ชันสำหรับดึงข้อมูลเซ็นเซอร์ล่าสุดออกมาใช้งาน (ปลอดภัยต่อการทำงานแบบ Multi-thread)
+SensorData sensors_get_data() {
+    SensorData current_data = {0};
+    if (data_mux != NULL && xSemaphoreTake(data_mux, pdMS_TO_TICKS(50))) {
+        current_data = received_data;
+        xSemaphoreGive(data_mux);
+    }
+    return current_data;
 }

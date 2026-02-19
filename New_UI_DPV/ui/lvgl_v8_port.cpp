@@ -17,6 +17,7 @@ using namespace esp_panel::drivers;
 
 static SemaphoreHandle_t lvgl_mux = nullptr;                  // LVGL mutex
 static TaskHandle_t lvgl_task_handle = nullptr;
+static volatile TaskHandle_t task_to_notify = nullptr; // Task to notify upon Vsync
 static esp_timer_handle_t lvgl_tick_timer = NULL;
 static void *lvgl_buf[LVGL_PORT_BUFFER_NUM_MAX] = {};
 
@@ -328,8 +329,10 @@ static void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t
             lcd->switchFrameBufferTo(next_fb);
 
             /* Waiting for the current frame buffer to complete transmission */
+            task_to_notify = xTaskGetCurrentTaskHandle();
             ulTaskNotifyValueClear(NULL, ULONG_MAX);
-            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100)); // Added 100ms timeout
+            task_to_notify = NULL;
 
             /* Synchronously update the dirty area for another frame buffer */
             flush_dirty_copy(flush_get_next_buf(lcd), color_map, &dirty_area);
@@ -359,8 +362,10 @@ static void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t
                 lcd->switchFrameBufferTo(next_fb);
 
                 /* Waiting for the current frame buffer to complete transmission */
+                task_to_notify = xTaskGetCurrentTaskHandle();
                 ulTaskNotifyValueClear(NULL, ULONG_MAX);
-                ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100)); // Added 100ms timeout
+                task_to_notify = NULL;
 
                 if (probe_result == FLUSH_PROBE_PART_COPY) {
                     /* Synchronously update the dirty area for another frame buffer */
@@ -387,8 +392,10 @@ static void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t
         lcd->switchFrameBufferTo(color_map);
 
         /* Waiting for the last frame buffer to complete transmission */
+        task_to_notify = xTaskGetCurrentTaskHandle();
         ulTaskNotifyValueClear(NULL, ULONG_MAX);
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100)); // Added 100ms timeout
+        task_to_notify = NULL;
     }
 
     lv_disp_flush_ready(drv);
@@ -405,8 +412,10 @@ static void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t
     lcd->switchFrameBufferTo(color_map);
 
     /* Waiting for the last frame buffer to complete transmission */
+    task_to_notify = xTaskGetCurrentTaskHandle();
     ulTaskNotifyValueClear(NULL, ULONG_MAX);
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100)); // Added 100ms timeout
+    task_to_notify = NULL;
 
     lv_disp_flush_ready(drv);
 }
@@ -462,9 +471,10 @@ IRAM_ATTR bool onLcdVsyncCallback(void *user_data)
         lvgl_port_lcd_last_buf = lvgl_port_lcd_next_buf;
     }
 #else
-    TaskHandle_t task_handle = (TaskHandle_t)user_data;
-    // Notify that the current LCD frame buffer has been transmitted
-    xTaskNotifyFromISR(task_handle, ULONG_MAX, eNoAction, &need_yield);
+    if (task_to_notify) {
+        // Notify that the current LCD frame buffer has been transmitted
+        xTaskNotifyFromISR(task_to_notify, ULONG_MAX, eNoAction, &need_yield);
+    }
 #endif
     return (need_yield == pdTRUE);
 }
@@ -594,8 +604,11 @@ static lv_disp_t *display_init(LCD *lcd)
 
     for (int i = 0; (i < LVGL_PORT_DISP_BUFFER_NUM) && (i < LVGL_PORT_BUFFER_NUM_MAX); i++) {
         lvgl_buf[i] = lcd->getFrameBufferByIndex(i);
+        if (lvgl_buf[i] == nullptr) {
+            ESP_UTILS_LOGE("Failed to get frame buffer %d", i);
+            return nullptr;
+        }
     }
-
 #endif
 #endif /* LVGL_PORT_AVOID_TEAR */
 
@@ -753,14 +766,22 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
     lv_disp_t *disp = nullptr;
     lv_indev_t *indev = nullptr;
 
+    ESP_UTILS_LOGI("LVGL Port: lv_init()...");
     lv_init();
 #if !LV_TICK_CUSTOM
+    ESP_UTILS_LOGI("LVGL Port: tick_init()...");
     ESP_UTILS_CHECK_FALSE_RETURN(tick_init(), false, "Initialize LVGL tick failed");
 #endif
 
-    ESP_UTILS_LOGI("Initializing LVGL display driver");
+#if LVGL_PORT_AVOID_TEAR
+    ESP_UTILS_LOGI("LVGL Port: attach Vsync callback...");
+    lcd->attachRefreshFinishCallback(onLcdVsyncCallback, NULL);
+#endif
+
+    ESP_UTILS_LOGI("LVGL Port: display_init()...");
     disp = display_init(lcd);
     ESP_UTILS_CHECK_NULL_RETURN(disp, false, "Initialize LVGL display driver failed");
+    ESP_UTILS_LOGI("LVGL Port: display_init() OK");
     // Record the initial rotation of the display
     lv_disp_set_rotation(disp, LV_DISP_ROT_NONE);
 
@@ -794,15 +815,14 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
     lvgl_mux = xSemaphoreCreateRecursiveMutex();
     ESP_UTILS_CHECK_NULL_RETURN(lvgl_mux, false, "Create LVGL mutex failed");
 
-    ESP_UTILS_LOGD("Create LVGL task");
+    ESP_UTILS_LOGI("LVGL Port: xTaskCreate()...");
     BaseType_t core_id = (LVGL_PORT_TASK_CORE < 0) ? tskNO_AFFINITY : LVGL_PORT_TASK_CORE;
     BaseType_t ret = xTaskCreatePinnedToCore(lvgl_port_task, "lvgl", LVGL_PORT_TASK_STACK_SIZE, NULL,
                      LVGL_PORT_TASK_PRIORITY, &lvgl_task_handle, core_id);
     ESP_UTILS_CHECK_FALSE_RETURN(ret == pdPASS, false, "Create LVGL task failed");
+    ESP_UTILS_LOGI("LVGL Port: init finished!");
 
-#if LVGL_PORT_AVOID_TEAR
-    lcd->attachRefreshFinishCallback(onLcdVsyncCallback, (void *)lvgl_task_handle);
-#endif
+
 
     return true;
 }

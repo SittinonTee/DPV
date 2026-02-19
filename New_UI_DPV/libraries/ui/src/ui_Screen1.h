@@ -13,15 +13,15 @@ extern "C" {
 // SCREEN: ui_Screen1
 extern void ui_Screen1_screen_init(void);
 extern void ui_Screen1_screen_destroy(void);
-extern lv_obj_t * ui_Screen1;
+extern lv_obj_t * ui_Screen1; 
 extern lv_obj_t * ui_Image2;
-extern lv_obj_t * ui_deep;
-extern lv_obj_t * ui_gear;
-extern lv_obj_t * ui_speed;
-extern lv_obj_t * ui_time;
-extern lv_obj_t * ui_percentage;
-extern lv_obj_t * ui_direction;
-extern lv_obj_t * ui_temp;
+extern lv_obj_t * ui_deep; // ความลึก
+extern lv_obj_t * ui_gear; // เกียร์เว้นไว้ก่อน
+extern lv_obj_t * ui_speed; // ความเร็ว
+extern lv_obj_t * ui_time; // เวลานับตอนเปิดเครื่อง
+extern lv_obj_t * ui_percentage; // เปอร์เซ็นต์แบตเตอรี่ น่าจะยังทำไม่ได้เว้นไว้ก่อน
+extern lv_obj_t * ui_direction; // ทิศทาง
+extern lv_obj_t * ui_temp; // อุณหภูมิ
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus
