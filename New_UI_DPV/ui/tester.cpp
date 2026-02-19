@@ -45,20 +45,20 @@ void tester_update() {
 
         // 2. Update UI (Thread Safe)
         if (lvgl_port_lock(0)) {
-            if (ui_deep != NULL) {
-                lv_label_set_text_fmt(ui_deep, "%.1f", depth);
+            if (ui_DEPTH != NULL) {
+                lv_label_set_text_fmt(ui_DEPTH, "%.1f", depth);
             }
-            if (ui_speed != NULL) {
-                lv_label_set_text_fmt(ui_speed, "%.1f", speed);
+            if (ui_SPEED != NULL) {
+                lv_label_set_text_fmt(ui_SPEED, "%.1f", speed);
             }
-            if (ui_gear != NULL) {
-                lv_label_set_text_fmt(ui_gear, "%d", gear);
+            if (ui_GEAR != NULL) {
+                lv_label_set_text_fmt(ui_GEAR, "%d", gear);
             }
-            if (ui_percentage != NULL) {
-                lv_label_set_text_fmt(ui_percentage, "%d%%", battery);
+            if (ui_BATTERY != NULL) {
+                lv_label_set_text_fmt(ui_BATTERY, "%d%%", battery);
             }
-            if (ui_temp != NULL) {
-                lv_label_set_text_fmt(ui_temp, "%.1f", temperature);
+            if (ui_TEMP != NULL) {
+                lv_label_set_text_fmt(ui_TEMP, "%.1f", temperature);
             }
             // Note: If you have a UI label for UV Index, add it here.
             // Example:

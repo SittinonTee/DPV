@@ -46,4 +46,8 @@
 3. หากขึ้นว่า `Failed`, ให้ลองสลับสาย SDA และ SCL หรือตรวจสอบว่าพิน SDO ของ BMP280 ต่อลง GND หรือไม่ (เพื่อระบุ Address 0x76)
 
 ---
-*จัดทำโดย Antigravity*
+ลิ้งบอร์ด: https://www.waveshare.com/esp32-s3-touch-lcd-4.3.htm?sku=30493
+
+ลิ้งเซนเซอร์: https://www.dfrobot.com/product-1793.html?srsltid=AfmBOoowc5911ifCZtKgLodL7qRahjZNshIZEjMv0PnTBP1UP2nZVREM
+
+ลิ้ง esp-32: https://www.arduitronics.com/product/5007/บอร์ด-esp-32-nodemcu-esp-wroom-32-wi-fi-and-bluetooth-dual-core-ch9102x-30-pin

@@ -2,7 +2,9 @@ SET(SOURCES ui_Screen1.c
     ui.c
     ui_comp_hook.c
     ui_helpers.c
-    ui_img_img_final_png.c
+    ui_img_img_final2_png.c
+    ui_img_img_vector_png.c
+    ui_img_img_group_30_png.c
     fonts/ui_font_DPV128.c
     fonts/ui_font_DPV220.c
     fonts/ui_font_DPV256.c

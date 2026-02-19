@@ -28,7 +28,9 @@ extern "C" {
 extern lv_obj_t * ui____initial_actions0;
 
 // IMAGES AND IMAGE SETS
-LV_IMG_DECLARE(ui_img_img_final_png);    // assets/img/final.png
+LV_IMG_DECLARE(ui_img_img_final2_png);    // assets/img/final2.png
+LV_IMG_DECLARE(ui_img_img_vector_png);    // assets/img/Vector.png
+LV_IMG_DECLARE(ui_img_img_group_30_png);    // assets/img/Group 30.png
 
 // FONTS
 LV_FONT_DECLARE(ui_font_DPV128);
